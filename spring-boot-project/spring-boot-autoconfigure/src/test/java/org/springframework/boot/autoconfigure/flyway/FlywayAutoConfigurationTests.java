@@ -25,7 +25,11 @@ import javax.sql.DataSource;
 
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.MigrationVersion;
+import org.flywaydb.core.api.callback.Callback;
+import org.flywaydb.core.api.callback.Context;
+import org.flywaydb.core.api.callback.Event;
 import org.flywaydb.core.api.callback.FlywayCallback;
+import org.flywaydb.core.internal.callback.LegacyCallback;
 import org.hibernate.engine.transaction.jta.platform.internal.NoJtaPlatform;
 import org.junit.Test;
 import org.mockito.InOrder;
@@ -296,23 +300,46 @@ public class FlywayAutoConfigurationTests {
 	}
 
 	@Test
+	public void callbacksAreConfiguredAndOrdered_legacy() {
+		this.contextRunner.withUserConfiguration(EmbeddedDataSourceConfiguration.class,
+				CallbackConfiguration.class).run((context) -> {
+			assertThat(context).hasSingleBean(Flyway.class);
+			Flyway flyway = context.getBean(Flyway.class);
+			FlywayCallback callbackOne = context.getBean("callbackOneLegacy",
+					FlywayCallback.class);
+			FlywayCallback callbackTwo = context.getBean("callbackTwoLegacy",
+					FlywayCallback.class);
+			assertThat(flyway.getCallbacks()).hasSize(2);
+			LegacyCallback legacyCallbackTwo = new LegacyCallback(callbackTwo);
+			LegacyCallback legacyCallbackOne = new LegacyCallback(callbackOne);
+			assertThat(flyway.getCallbacks()).containsExactly(legacyCallbackTwo,
+					legacyCallbackOne);
+			InOrder orderedCallbacks = inOrder(legacyCallbackOne, legacyCallbackTwo);
+			orderedCallbacks.verify(callbackTwo)
+					.beforeMigrate(any(Connection.class));
+			orderedCallbacks.verify(callbackOne)
+					.beforeMigrate(any(Connection.class));
+		});
+	}
+
+	@Test
 	public void callbacksAreConfiguredAndOrdered() {
 		this.contextRunner.withUserConfiguration(EmbeddedDataSourceConfiguration.class,
 				CallbackConfiguration.class).run((context) -> {
 					assertThat(context).hasSingleBean(Flyway.class);
 					Flyway flyway = context.getBean(Flyway.class);
-					FlywayCallback callbackOne = context.getBean("callbackOne",
-							FlywayCallback.class);
-					FlywayCallback callbackTwo = context.getBean("callbackTwo",
-							FlywayCallback.class);
+					Callback callbackOne = context.getBean("callbackOne",
+							Callback.class);
+					Callback callbackTwo = context.getBean("callbackTwo",
+							Callback.class);
 					assertThat(flyway.getCallbacks()).hasSize(2);
 					assertThat(flyway.getCallbacks()).containsExactly(callbackTwo,
 							callbackOne);
 					InOrder orderedCallbacks = inOrder(callbackOne, callbackTwo);
 					orderedCallbacks.verify(callbackTwo)
-							.beforeMigrate(any(Connection.class));
+							.handle(Event.BEFORE_MIGRATE, any(Context.class));
 					orderedCallbacks.verify(callbackOne)
-							.beforeMigrate(any(Connection.class));
+							.handle(Event.BEFORE_MIGRATE, any(Context.class));
 				});
 	}
 
@@ -395,13 +422,30 @@ public class FlywayAutoConfigurationTests {
 
 		@Bean
 		@Order(1)
-		public FlywayCallback callbackOne() {
+		public Callback callbackOne() {
+			return mock(Callback.class);
+		}
+
+		@Bean
+		@Order(0)
+		public Callback callbackTwo() {
+			return mock(Callback.class);
+		}
+
+	}
+
+	@Configuration
+	static class CallbackConfigurationLegacy {
+
+		@Bean
+		@Order(1)
+		public FlywayCallback callbackOneLegacy() {
 			return mock(FlywayCallback.class);
 		}
 
 		@Bean
 		@Order(0)
-		public FlywayCallback callbackTwo() {
+		public FlywayCallback callbackTwoLegacy() {
 			return mock(FlywayCallback.class);
 		}
 
